@@ -1,4 +1,4 @@
-# Telegram Bot — ersiemore
+# Telegram Bot — @ModerationRelayBot
 
 Учебный проект SmartNation College.  
 Бот написан на Python с использованием библиотеки `pyTelegramBotAPI`
