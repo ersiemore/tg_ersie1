@@ -84,7 +84,7 @@ def callback_menu(call):
         bot.send_message(call.message.chat.id, "✏️ Напиши своё сообщение:")
         bot.register_next_step_handler(call.message, handle_report_message)
     elif data == "help_about":
-        bot.send_message(call.message.chat.id, "Я — бот, который передаёт сообщения администратору.")
+        bot.send_message(call.message.chat.id, "Я — бот, который передаёт сообщения ерсимору.")
     elif data == "back_to_main":
         main_menu(call.message)
 
@@ -97,7 +97,7 @@ def handle_report_message(message):
         return
     save_report(user_id, username, user_message)
     notify_admin(user_id, username, user_message)
-    bot.send_message(message.chat.id, "✅ Твоё сообщение отправлено админу.")
+    bot.send_message(message.chat.id, "✅ Твоё сообщение отправлено ерсимору.")
 
 @bot.message_handler(commands=['view_reports'])
 def view_reports(message):
