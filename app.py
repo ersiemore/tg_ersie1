@@ -6,13 +6,24 @@ from telebot import types
 
 bot = telebot.TeleBot(TOKEN)
 
+last_message_time = {}
+SPAM_DELAY = 5
+
 def init_db():
     conn = sqlite3.connect('messages.db')
     c = conn.cursor()
     c.execute('''
-        CREATE TABLE IF NOT EXISTS reports
-        (user_id INTEGER, username TEXT, message TEXT, status TEXT)
+        CREATE TABLE IF NOT EXISTS reports (
+            user_id INTEGER,
+            username TEXT,
+            status TEXT
+        )
     ''')
+    try:
+        c.execute("ALTER TABLE reports ADD COLUMN message TEXT")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name: message" not in str(e):
+            raise
     conn.commit()
     conn.close()
 
@@ -31,9 +42,6 @@ def notify_admin(user_id, username, message):
         ADMIN_ID,
         f"📩 Новое сообщение от @{username or 'пользователя без username'} (ID: {user_id}):\n\n{message}"
     )
-
-last_message_time = {}
-SPAM_DELAY = 5
 
 def check_spam(user_id):
     now = time.time()
@@ -91,11 +99,6 @@ def handle_report_message(message):
     notify_admin(user_id, username, user_message)
     bot.send_message(message.chat.id, "✅ Твоё сообщение отправлено админу.")
 
-@bot.message_handler(commands=['help'])
-def help_command(message):
-    bot.send_message(message.chat.id,
-                     "📋 Команды:\n/start — меню")
-
 @bot.message_handler(commands=['view_reports'])
 def view_reports(message):
     if message.from_user.id != ADMIN_ID:
@@ -103,15 +106,14 @@ def view_reports(message):
         return
     conn = sqlite3.connect('messages.db')
     c = conn.cursor()
-    c.execute("SELECT * FROM reports WHERE status = 'new'")
+    c.execute("SELECT user_id, username, message, status FROM reports WHERE status = 'new'")
     reports = c.fetchall()
     conn.close()
     if not reports:
         bot.send_message(message.chat.id, "📭 Нет новых сообщений.")
     else:
         for (user_id, username, msg, status) in reports:
-            bot.send_message(message.chat.id,
-                             f"📨 От @{username} (ID: {user_id}):\n{msg}")
+            bot.send_message(message.chat.id, f"📨 От @{username} (ID: {user_id}):\n{msg}")
 
 @bot.message_handler(func=lambda message: True)
 def unknown_message(message):
@@ -119,5 +121,5 @@ def unknown_message(message):
 
 if __name__ == "__main__":
     init_db()
-    print("Бот запущен...")
+    print("Бот запущен…")
     bot.polling(none_stop=True)
