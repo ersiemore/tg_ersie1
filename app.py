@@ -33,24 +33,13 @@ def save_report(user_id, username, message):
     conn.commit()
     conn.close()
 
-def set_report_status(user_id, message, status):
-    conn = sqlite3.connect('messages.db')
-    c = conn.cursor()
-    c.execute(
-        "UPDATE reports SET status = ? WHERE user_id = ? AND message = ?",
-        (status, user_id, message)
-    )
-    conn.commit()
-    conn.close()
-
 def notify_admin(user_id, username, message):
-    # отправляем админу сообщение + кнопку "ответить"
     markup = types.InlineKeyboardMarkup()
     btn = types.InlineKeyboardButton("Ответить", callback_data=f"reply|{user_id}")
     markup.add(btn)
     bot.send_message(
         ADMIN_ID,
-        f"📩 Новое сообщение от @{username or 'без имени'} (ID: {user_id}):\n\n{message}",
+        f"📩 Новое сообщение от @{username or 'без username'} (ID: {user_id}):\n\n{message}",
         reply_markup=markup
     )
 
@@ -94,15 +83,14 @@ def callback_menu(call):
     elif data == "do_report":
         bot.send_message(call.message.chat.id, "✏️ Напиши своё сообщение:")
         bot.register_next_step_handler(call.message, handle_report_message)
-    elif data == "help_about":
-        bot.send_message(call.message.chat.id, "Я - tg bot который отправит сообщение напрямую к ersiemory.")
     elif data.startswith("reply|"):
-        # Админ нажал "ответить", извлекаем user_id
         parts = data.split("|")
         if len(parts) == 2:
             target_user_id = int(parts[1])
             bot.send_message(call.message.chat.id, f"Напиши сообщение для пользователя {target_user_id}:")
             bot.register_next_step_handler(call.message, reply_to_user, target_user_id)
+    elif data == "help_about":
+        bot.send_message(call.message.chat.id, "Я — бот, который передаёт сообщения Ивану.")
     elif data == "back_to_main":
         main_menu(call.message)
 
@@ -111,25 +99,39 @@ def handle_report_message(message):
     username = message.from_user.username or message.from_user.first_name
     user_message = message.text
     if check_spam(user_id):
-        bot.send_message(message.chat.id, "⚠️ Пожалуйста, подожди немного.")
+        bot.send_message(message.chat.id, "⚠️ Подожди немного, пожалуйста.")
         return
     save_report(user_id, username, user_message)
     notify_admin(user_id, username, user_message)
-    bot.send_message(message.chat.id, "✅ Твоё сообщение отправлено ersiemory.")
+    bot.send_message(message.chat.id, "✅ Твоё сообщение отправлено Ивану.")
 
 def reply_to_user(message, target_user_id):
-    # это сообщение от админа, нужно переслать пользователю
     text = message.text
-    bot.send_message(target_user_id, f"📬 Ответ от админа:\n\n{text}")
-    # можно отмечать в базе, что ответ дан
-    set_report_status(target_user_id, message.reply_to_message.text if message.reply_to_message else "", "replied")
+    bot.send_message(target_user_id, f"📬 Ответ от Ивана:\n\n{text}")
     bot.send_message(message.chat.id, "Ответ отправлен.")
+
+@bot.message_handler(commands=['view_reports'])
+def view_reports(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "🚫 У вас нет прав.")
+        return
+    conn = sqlite3.connect('messages.db')
+    c = conn.cursor()
+    c.execute("SELECT user_id, username, message, status FROM reports WHERE status = 'new'")
+    reports = c.fetchall()
+    conn.close()
+    if not reports:
+        bot.send_message(message.chat.id, "📭 Нет новых сообщений.")
+    else:
+        for (user_id, username, msg, status) in reports:
+            bot.send_message(message.chat.id, f"📨 От @{username} (ID: {user_id}):\n{msg}")
 
 @bot.message_handler(func=lambda message: True)
 def unknown_message(message):
-    bot.reply_to(message, "Не понял. Напиши /start для меню.")
+    bot.reply_to(message, "Не понял. Напиши /start.")
 
 if __name__ == "__main__":
     init_db()
-    print("Ersiemore king")
+    bot.delete_webhook()
+    print("Бот запущен")
     bot.polling(none_stop=True)
