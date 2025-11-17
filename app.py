@@ -1,84 +1,129 @@
 import telebot
 import sqlite3
-from config import TOKEN
+import time
+from config import TOKEN, ADMIN_ID
 
 bot = telebot.TeleBot(TOKEN)
+user_last_message = {}
 
-# === ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ ===
 def init_db():
-    conn = sqlite3.connect('messages.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS reports
-                 (user_id INTEGER, username TEXT, message TEXT, status TEXT)''')
-    conn.commit()
-    conn.close()
+    with sqlite3.connect("messages.db") as conn:
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                username TEXT,
+                text TEXT,
+                status TEXT,
+                admin_reply TEXT
+            )
+        """)
+        conn.commit()
 
-# === СОХРАНЕНИЕ СООБЩЕНИЯ В БАЗЕ ===
-def save_report(user_id, username, message):
-    conn = sqlite3.connect('messages.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO reports (user_id, username, message, status) VALUES (?, ?, ?, ?)",
-              (user_id, username, message, 'new'))
-    conn.commit()
-    conn.close()
+def save_report(user_id, username, text):
+    with sqlite3.connect("messages.db") as conn:
+        c = conn.cursor()
+        c.execute("INSERT INTO reports (user_id, username, text, status) VALUES (?, ?, ?, ?)",
+                  (user_id, username, text, "new"))
+        conn.commit()
 
-# === ОТПРАВКА СООБЩЕНИЯ АДМИНУ ===
-def notify_admin(user_id, username, message):
-    admin_id = 8219861530
-    bot.send_message(admin_id, f"📩 Новое сообщение от @{username or 'пользователя без username'} (ID: {user_id}):\n\n{message}")
+def notify_admin(user_id, username, text):
+    formatted = (
+        "📨 *Новое сообщение*\n\n"
+        f"👤 *От:* @{username or 'без имени'}\n"
+        f"🆔 *ID:* `{user_id}`\n"
+        f"💬 *Текст:* {text}"
+    )
+    bot.send_message(ADMIN_ID, formatted, parse_mode="Markdown")
 
-# === КОМАНДЫ БОТА ===
-@bot.message_handler(commands=['start'])
+@bot.message_handler(commands=["start"])
 def start(message):
-    bot.send_message(message.chat.id, "Привет! 👋 Я твой менеджер-бот. Если тебе ограничили доступ, ты можешь написать мне, и я передам сообщение админу.\n\nИспользуй команду /report, чтобы отправить сообщение.")
+    bot.send_message(
+        message.chat.id,
+        "Привет 👋\n\n"
+        "Если у тебя ограничен доступ в ТГ, можешь написать мне — я передам сообщение админу.\n\n"
+        "Нажми /report чтобы отправить сообщение."
+    )
 
-@bot.message_handler(commands=['help'])
+@bot.message_handler(commands=["help"])
 def help_command(message):
-    bot.send_message(message.chat.id, "📋 Команды:\n/start — начать\n/help — помощь\n/report — написать админу")
+    bot.send_message(
+        message.chat.id,
+        "📘 Команды:\n"
+        "/start — начало\n"
+        "/help — помощь\n"
+        "/report — написать админу"
+    )
 
-@bot.message_handler(commands=['report'])
-def report_command(message):
-    bot.send_message(message.chat.id, "✏️ Напиши своё сообщение, и я передам его админу.")
-    bot.register_next_step_handler(message, handle_report_message)
+@bot.message_handler(commands=["report"])
+def report(message):
+    bot.send_message(message.chat.id, "✏️ Напиши своё сообщение сюда.")
+    bot.register_next_step_handler(message, handle_report)
 
-# === ОБРАБОТКА ОТПРАВЛЕННОГО СООБЩЕНИЯ ===
-def handle_report_message(message):
+def handle_report(message):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
-    user_message = message.text
+    text = message.text
 
-    save_report(user_id, username, user_message)
-    notify_admin(user_id, username, user_message)
+    now = time.time()
+    if user_id in user_last_message and now - user_last_message[user_id] < 10:
+        return bot.send_message(message.chat.id, "⏳ Подожди немного перед следующей отправкой.")
+    user_last_message[user_id] = now
 
-    bot.send_message(message.chat.id, "✅ Спасибо! Твоё сообщение отправлено админу.")
+    save_report(user_id, username, text)
+    notify_admin(user_id, username, text)
 
-# === КОМАНДА ДЛЯ ПРОСМОТРА СООБЩЕНИЙ (ТОЛЬКО ДЛЯ АДМИНА) ===
-@bot.message_handler(commands=['view_reports'])
-def view_reports(message):
-    admin_id = 123456789  # 👈 Замени на свой Telegram ID
-    if message.from_user.id != admin_id:
-        bot.send_message(message.chat.id, "🚫 У вас нет прав для этой команды.")
-        return
+    bot.send_message(
+        message.chat.id,
+        "✅ Сообщение отправлено админу. Ожидай ответа."
+    )
+
+@bot.message_handler(commands=["view"])
+def view(message):
+    if message.from_user.id != ADMIN_ID:
+        return bot.send_message(message.chat.id, "🚫 Нет доступа.")
     
-    conn = sqlite3.connect('messages.db')
-    c = conn.cursor()
-    c.execute("SELECT * FROM reports WHERE status = 'new'")
-    reports = c.fetchall()
-    conn.close()
+    with sqlite3.connect("messages.db") as conn:
+        c = conn.cursor()
+        c.execute("SELECT id, user_id, username, text FROM reports WHERE status='new'")
+        data = c.fetchall()
 
-    if not reports:
-        bot.send_message(message.chat.id, "📭 Нет новых сообщений.")
-    else:
-        for report in reports:
-            user_id, username, msg, status = report
-            bot.send_message(message.chat.id, f"📨 От @{username} (ID: {user_id}):\n{msg}")
+    if not data:
+        return bot.send_message(message.chat.id, "📭 Новых сообщений нет.")
 
-# === ЕСЛИ СООБЩЕНИЕ НЕ РАСПОЗНАНО ===
-@bot.message_handler(func=lambda message: True)
-def unknown_message(message):
-    bot.reply_to(message, "Не понял команду. Напиши /help для списка команд.")
+    for row in data:
+        rid, uid, uname, text = row
+        bot.send_message(
+            message.chat.id,
+            f"📥 *ID отчёта:* `{rid}`\n"
+            f"👤 @{uname}\n"
+            f"🆔 {uid}\n"
+            f"💬 {text}",
+            parse_mode="Markdown"
+        )
 
-# === ЗАПУСК ===
+@bot.message_handler(commands=["reply"])
+def reply(message):
+    if message.from_user.id != ADMIN_ID:
+        return bot.send_message(message.chat.id, "🚫 Нет доступа.")
+
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        return bot.send_message(message.chat.id, "Использование: /reply user_id текст")
+
+    user_id = parts[1]
+    text = parts[2]
+
+    try:
+        bot.send_message(int(user_id), f"📬 *Ответ от админа:*\n{text}", parse_mode="Markdown")
+        bot.send_message(message.chat.id, "✅ Ответ отправлен.")
+    except:
+        bot.send_message(message.chat.id, "⚠️ Не удалось отправить сообщение пользователю.")
+
+@bot.message_handler(func=lambda m: True)
+def unknown(message):
+    bot.send_message(message.chat.id, "Не понял. Используй /help.")
+
 init_db()
-print("Бот запущен...")
 bot.polling()
