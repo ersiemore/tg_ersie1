@@ -16,10 +16,13 @@ def init_db():
         CREATE TABLE IF NOT EXISTS reports (
             user_id INTEGER,
             username TEXT,
-            message TEXT,
             status TEXT
         )
     ''')
+    c.execute("PRAGMA table_info(reports)")
+    cols = [row[1] for row in c.fetchall()]
+    if "message" not in cols:
+        c.execute("ALTER TABLE reports ADD COLUMN message TEXT")
     conn.commit()
     conn.close()
 
